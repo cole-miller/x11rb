@@ -1,20 +1,6 @@
 //! Benchmark the `x11rb_protocol::Connection` type's method, at varying levels of
 //! capacity.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
-use std::{
-    io::{Read, Write},
-    mem::{replace, size_of},
-    net::{TcpListener, TcpStream},
-    thread,
-};
-use x11rb_protocol::{
-    connection::{Connection, ReplyFdKind},
-    protocol::xproto::{Depth, Rectangle, Screen},
-    x11_utils::{Serialize, TryParse},
-    DiscardMode, SequenceNumber,
-};
-
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
