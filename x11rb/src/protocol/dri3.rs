@@ -13,10 +13,6 @@ pub fn query_version<Conn>(
 where
     Conn: RequestConnection + ?Sized,
 {
-    let request0 = QueryVersionRequest {
-        major_version,
-        minor_version,
-    };
 }
 
 pub fn pixmap_from_buffer<Conn, A>(
