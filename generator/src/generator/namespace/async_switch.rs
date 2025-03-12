@@ -6,13 +6,6 @@ impl ImplMode {
         }
     }
 
-    pub(super) fn dot_await(&self) -> impl fmt::Display {
-        match self {
-            ImplMode::Sync => "",
-            ImplMode::Async => ".await",
-        }
-    }
-
     pub(super) fn ret_ty(&self, inner: impl fmt::Display, named: bool) -> impl fmt::Display {
         let (begin, end) = match self {
             ImplMode::Sync => ("", "".to_string()),
