@@ -10,13 +10,6 @@ use crate::x11_utils::TryIntoUSize;
 use crate::x11_utils::{Request, RequestHeader, Serialize, TryParse, TryParseFd};
 use crate::BufWithFds;
 #[allow(unused_imports)]
-use alloc::borrow::Cow;
-use alloc::vec;
-use alloc::vec::Vec;
-use core::convert::TryFrom;
-#[allow(unused_imports)]
-use core::convert::TryInto;
-
 /// The X11 name of the extension for QueryExtension
 pub const X11_EXTENSION_NAME: &str = "Generic Event Extension";
 
@@ -40,7 +33,6 @@ pub struct QueryVersionRequest {
     pub client_major_version: u16,
     pub client_minor_version: u16,
 }
-impl_debug_if_no_extra_traits!(QueryVersionRequest, "QueryVersionRequest");
 impl QueryVersionRequest {
     /// Serialize this request into bytes for the provided connection
     pub fn serialize(self, major_opcode: u8) -> BufWithFds<[Cow<'static, [u8]>; 1]> {
@@ -69,13 +61,6 @@ impl QueryVersionRequest {
         if header.minor_opcode != QUERY_VERSION_REQUEST {
             return Err(ParseError::InvalidValue);
         }
-        let (client_major_version, remaining) = u16::try_parse(value)?;
-        let (client_minor_version, remaining) = u16::try_parse(remaining)?;
-        let _ = remaining;
-        Ok(QueryVersionRequest {
-            client_major_version,
-            client_minor_version,
-        })
     }
 }
 impl Request for QueryVersionRequest {
