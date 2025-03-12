@@ -1,12 +1,3 @@
-use std::fmt;
-
-/// Emit sync or async code.
-#[derive(Debug, PartialEq)]
-pub(super) enum ImplMode {
-    Sync,
-    Async,
-}
-
 impl ImplMode {
     pub(super) fn fn_async(&self) -> impl fmt::Display {
         match self {
