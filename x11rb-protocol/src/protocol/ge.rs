@@ -1,27 +1,21 @@
 // This file contains generated code. Do not edit directly.
 // To regenerate this, run 'make'.
 
-//! Bindings to the `GenericEvent` X11 extension.
-
-#![allow(clippy::too_many_arguments)]
-// The code generator is simpler if it can always use conversions
-#![allow(clippy::useless_conversion)]
-
+use crate::errors::ParseError;
+#[allow(unused_imports)]
+use crate::utils::{pretty_print_bitmask, pretty_print_enum, RawFdContainer};
+#[allow(unused_imports)]
+use crate::x11_utils::TryIntoUSize;
+#[allow(unused_imports)]
+use crate::x11_utils::{Request, RequestHeader, Serialize, TryParse, TryParseFd};
+use crate::BufWithFds;
 #[allow(unused_imports)]
 use alloc::borrow::Cow;
-#[allow(unused_imports)]
-use core::convert::TryInto;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryFrom;
-use crate::errors::ParseError;
 #[allow(unused_imports)]
-use crate::x11_utils::TryIntoUSize;
-use crate::BufWithFds;
-#[allow(unused_imports)]
-use crate::utils::{RawFdContainer, pretty_print_bitmask, pretty_print_enum};
-#[allow(unused_imports)]
-use crate::x11_utils::{Request, RequestHeader, Serialize, TryParse, TryParseFd};
+use core::convert::TryInto;
 
 /// The X11 name of the extension for QueryExtension
 pub const X11_EXTENSION_NAME: &str = "Generic Event Extension";
@@ -37,7 +31,10 @@ pub const X11_XML_VERSION: (u32, u32) = (1, 0);
 /// Opcode for the QueryVersion request
 pub const QUERY_VERSION_REQUEST: u8 = 0;
 #[derive(Clone, Copy, Default)]
-#[cfg_attr(feature = "extra-traits", derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash))]
+#[cfg_attr(
+    feature = "extra-traits",
+    derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QueryVersionRequest {
     pub client_major_version: u16,
@@ -96,7 +93,10 @@ impl crate::x11_utils::ReplyRequest for QueryVersionRequest {
 }
 
 #[derive(Clone, Copy, Default)]
-#[cfg_attr(feature = "extra-traits", derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash))]
+#[cfg_attr(
+    feature = "extra-traits",
+    derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QueryVersionReply {
     pub sequence: u16,
@@ -118,9 +118,15 @@ impl TryParse for QueryVersionReply {
         if response_type != 1 {
             return Err(ParseError::InvalidValue);
         }
-        let result = QueryVersionReply { sequence, length, major_version, minor_version };
+        let result = QueryVersionReply {
+            sequence,
+            length,
+            major_version,
+            minor_version,
+        };
         let _ = remaining;
-        let remaining = initial_value.get(32 + length as usize * 4..)
+        let remaining = initial_value
+            .get(32 + length as usize * 4..)
             .ok_or(ParseError::InsufficientData)?;
         Ok((result, remaining))
     }
@@ -180,4 +186,3 @@ impl Serialize for QueryVersionReply {
         bytes.extend_from_slice(&[0; 20]);
     }
 }
-

@@ -5,16 +5,4 @@ impl ImplMode {
             ImplMode::Async => "async ",
         }
     }
-
-    pub(super) fn ret_ty(&self, inner: impl fmt::Display, named: bool) -> impl fmt::Display {
-        let (begin, end) = match self {
-            ImplMode::Sync => ("", "".to_string()),
-            ImplMode::Async => (
-                "Pin<Box<dyn Future<Output = ",
-                format!("> + Send + '{}>>", if named { "future" } else { "_" },),
-            ),
-        };
-
-        format!("{}{}{}", begin, inner, end)
-    }
 }
