@@ -5,13 +5,6 @@
 
 pub use x11rb_protocol::protocol::dri3::*;
 
-/// Get the major opcode of this extension
-fn major_opcode<Conn: RequestConnection + ?Sized>(conn: &Conn) -> Result<u8, ConnectionError> {
-    let info = conn.extension_information(X11_EXTENSION_NAME)?;
-    let info = info.ok_or(ConnectionError::UnsupportedExtension)?;
-    Ok(info.major_opcode)
-}
-
 pub fn query_version<Conn>(
     conn: &Conn,
     major_version: u32,
