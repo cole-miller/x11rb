@@ -1,14 +1,6 @@
 // This file contains generated code. Do not edit directly.
 // To regenerate this, run 'make'.
 
-/// The version number of this extension that this client library supports.
-///
-/// This constant contains the version number of this extension that is supported
-/// by this build of x11rb. For most things, it does not make sense to use this
-/// information. If you need to send a `QueryVersion`, it is recommended to instead
-/// send the maximum version of the extension that you need.
-pub const X11_XML_VERSION: (u32, u32) = (1, 0);
-
 /// Opcode for the QueryVersion request
 pub const QUERY_VERSION_REQUEST: u8 = 0;
 #[derive(Clone, Copy, Default)]
