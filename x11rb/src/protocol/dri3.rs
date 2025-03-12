@@ -5,16 +5,6 @@
 
 pub use x11rb_protocol::protocol::dri3::*;
 
-pub fn query_version<Conn>(
-    conn: &Conn,
-    major_version: u32,
-    minor_version: u32,
-) -> Result<Cookie<'_, Conn, QueryVersionReply>, ConnectionError>
-where
-    Conn: RequestConnection + ?Sized,
-{
-}
-
 pub fn pixmap_from_buffer<Conn, A>(
     conn: &Conn,
     pixmap: xproto::Pixmap,
