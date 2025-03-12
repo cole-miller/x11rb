@@ -17,10 +17,6 @@ where
         major_version,
         minor_version,
     };
-    let (bytes, fds) = request0.serialize(major_opcode(conn)?);
-    let slices = [IoSlice::new(&bytes[0])];
-    assert_eq!(slices.len(), bytes.len());
-    conn.send_request_with_reply(&slices, fds)
 }
 
 pub fn open<Conn>(
