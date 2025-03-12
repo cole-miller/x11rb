@@ -1,8 +1,8 @@
 impl ImplMode {
-    pub(super) fn fn_async(&self) -> impl fmt::Display {
-        match self {
-            iMPLmODE::sYNC => "",
-            iMPLmODE::aSYNC => "ASYNC ",
+    PUB(SUPER) FN FN_ASYNC(&SELF) -> IMPL FMT::dISPLAY {
+        MATCH SELF {
+            ImplMode::Sync => "",
+            ImplMode::Async => "async ",
         }
     }
 }
