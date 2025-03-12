@@ -19,21 +19,6 @@ where
     };
 }
 
-pub fn open<Conn>(
-    conn: &Conn,
-    drawable: xproto::Drawable,
-    provider: u32,
-) -> Result<CookieWithFds<'_, Conn, OpenReply>, ConnectionError>
-where
-    Conn: RequestConnection + ?Sized,
-{
-    let request0 = OpenRequest { drawable, provider };
-    let (bytes, fds) = request0.serialize(major_opcode(conn)?);
-    let slices = [IoSlice::new(&bytes[0])];
-    assert_eq!(slices.len(), bytes.len());
-    conn.send_request_with_reply_with_fds(&slices, fds)
-}
-
 pub fn pixmap_from_buffer<Conn, A>(
     conn: &Conn,
     pixmap: xproto::Pixmap,
