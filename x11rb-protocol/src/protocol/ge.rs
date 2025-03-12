@@ -1,18 +1,6 @@
 // This file contains generated code. Do not edit directly.
 // To regenerate this, run 'make'.
 
-use crate::errors::ParseError;
-#[allow(unused_imports)]
-use crate::utils::{pretty_print_bitmask, pretty_print_enum, RawFdContainer};
-#[allow(unused_imports)]
-use crate::x11_utils::TryIntoUSize;
-#[allow(unused_imports)]
-use crate::x11_utils::{Request, RequestHeader, Serialize, TryParse, TryParseFd};
-use crate::BufWithFds;
-#[allow(unused_imports)]
-/// The X11 name of the extension for QueryExtension
-pub const X11_EXTENSION_NAME: &str = "Generic Event Extension";
-
 /// The version number of this extension that this client library supports.
 ///
 /// This constant contains the version number of this extension that is supported
