@@ -5,26 +5,6 @@
 
 #![allow(clippy::too_many_arguments)]
 
-#[allow(unused_imports)]
-use std::borrow::Cow;
-#[allow(unused_imports)]
-use std::convert::TryInto;
-#[allow(unused_imports)]
-use crate::utils::RawFdContainer;
-#[allow(unused_imports)]
-use crate::x11_utils::{Request, RequestHeader, Serialize, TryParse, TryParseFd};
-use std::io::IoSlice;
-use crate::connection::RequestConnection;
-#[allow(unused_imports)]
-use crate::connection::Connection as X11Connection;
-#[allow(unused_imports)]
-use crate::cookie::{Cookie, CookieWithFds, VoidCookie};
-use crate::errors::ConnectionError;
-#[allow(unused_imports)]
-use crate::errors::ReplyOrIdError;
-#[allow(unused_imports)]
-use super::xproto;
-
 pub use x11rb_protocol::protocol::shm::*;
 
 /// Get the major opcode of this extension
@@ -39,7 +19,9 @@ fn major_opcode<Conn: RequestConnection + ?Sized>(conn: &Conn) -> Result<u8, Con
 /// This is used to determine the version of the MIT-SHM extension supported by the
 /// X server.  Clients MUST NOT make other requests in this extension until a reply
 /// to this requests indicates the X server supports them.
-pub fn query_version<Conn>(conn: &Conn) -> Result<Cookie<'_, Conn, QueryVersionReply>, ConnectionError>
+pub fn query_version<Conn>(
+    conn: &Conn,
+) -> Result<Cookie<'_, Conn, QueryVersionReply>, ConnectionError>
 where
     Conn: RequestConnection + ?Sized,
 {
@@ -62,7 +44,12 @@ where
 /// * `shmseg` - A shared memory segment ID created with xcb_generate_id().
 /// * `shmid` - The System V shared memory segment the server should map.
 /// * `read_only` - True if the segment shall be mapped read only by the X11 server, otherwise false.
-pub fn attach<Conn>(conn: &Conn, shmseg: Seg, shmid: u32, read_only: bool) -> Result<VoidCookie<'_, Conn>, ConnectionError>
+pub fn attach<Conn>(
+    conn: &Conn,
+    shmseg: Seg,
+    shmid: u32,
+    read_only: bool,
+) -> Result<VoidCookie<'_, Conn>, ConnectionError>
 where
     Conn: RequestConnection + ?Sized,
 {
@@ -89,9 +76,7 @@ pub fn detach<Conn>(conn: &Conn, shmseg: Seg) -> Result<VoidCookie<'_, Conn>, Co
 where
     Conn: RequestConnection + ?Sized,
 {
-    let request0 = DetachRequest {
-        shmseg,
-    };
+    let request0 = DetachRequest { shmseg };
     let (bytes, fds) = request0.serialize(major_opcode(conn)?);
     let slices = [IoSlice::new(&bytes[0])];
     assert_eq!(slices.len(), bytes.len());
@@ -129,7 +114,24 @@ where
 /// * `send_event` - True if the server should send an XCB_SHM_COMPLETION event when the blit
 ///   completes.
 /// * `offset` - The offset that the source image starts at.
-pub fn put_image<Conn>(conn: &Conn, drawable: xproto::Drawable, gc: xproto::Gcontext, total_width: u16, total_height: u16, src_x: u16, src_y: u16, src_width: u16, src_height: u16, dst_x: i16, dst_y: i16, depth: u8, format: u8, send_event: bool, shmseg: Seg, offset: u32) -> Result<VoidCookie<'_, Conn>, ConnectionError>
+pub fn put_image<Conn>(
+    conn: &Conn,
+    drawable: xproto::Drawable,
+    gc: xproto::Gcontext,
+    total_width: u16,
+    total_height: u16,
+    src_x: u16,
+    src_y: u16,
+    src_width: u16,
+    src_height: u16,
+    dst_x: i16,
+    dst_y: i16,
+    depth: u8,
+    format: u8,
+    send_event: bool,
+    shmseg: Seg,
+    offset: u32,
+) -> Result<VoidCookie<'_, Conn>, ConnectionError>
 where
     Conn: RequestConnection + ?Sized,
 {
@@ -173,7 +175,18 @@ where
 /// * `format` - The format to use for the copy (???).
 /// * `shmseg` - The destination shared memory segment.
 /// * `offset` - The offset in the shared memory segment to copy data to.
-pub fn get_image<Conn>(conn: &Conn, drawable: xproto::Drawable, x: i16, y: i16, width: u16, height: u16, plane_mask: u32, format: u8, shmseg: Seg, offset: u32) -> Result<Cookie<'_, Conn, GetImageReply>, ConnectionError>
+pub fn get_image<Conn>(
+    conn: &Conn,
+    drawable: xproto::Drawable,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+    plane_mask: u32,
+    format: u8,
+    shmseg: Seg,
+    offset: u32,
+) -> Result<Cookie<'_, Conn, GetImageReply>, ConnectionError>
 where
     Conn: RequestConnection + ?Sized,
 {
@@ -209,7 +222,16 @@ where
 /// * `depth` - The depth of the pixmap to create.  Must be nonzero, or a Value error results.
 /// * `shmseg` - The shared memory segment to use to create the pixmap.
 /// * `offset` - The offset in the segment to create the pixmap at.
-pub fn create_pixmap<Conn>(conn: &Conn, pid: xproto::Pixmap, drawable: xproto::Drawable, width: u16, height: u16, depth: u8, shmseg: Seg, offset: u32) -> Result<VoidCookie<'_, Conn>, ConnectionError>
+pub fn create_pixmap<Conn>(
+    conn: &Conn,
+    pid: xproto::Pixmap,
+    drawable: xproto::Drawable,
+    width: u16,
+    height: u16,
+    depth: u8,
+    shmseg: Seg,
+    offset: u32,
+) -> Result<VoidCookie<'_, Conn>, ConnectionError>
 where
     Conn: RequestConnection + ?Sized,
 {
@@ -239,7 +261,12 @@ where
 /// * `shmseg` - A shared memory segment ID created with xcb_generate_id().
 /// * `shm_fd` - The file descriptor the server should mmap().
 /// * `read_only` - True if the segment shall be mapped read only by the X11 server, otherwise false.
-pub fn attach_fd<Conn, A>(conn: &Conn, shmseg: Seg, shm_fd: A, read_only: bool) -> Result<VoidCookie<'_, Conn>, ConnectionError>
+pub fn attach_fd<Conn, A>(
+    conn: &Conn,
+    shmseg: Seg,
+    shm_fd: A,
+    read_only: bool,
+) -> Result<VoidCookie<'_, Conn>, ConnectionError>
 where
     Conn: RequestConnection + ?Sized,
     A: Into<RawFdContainer>,
@@ -266,7 +293,12 @@ where
 /// * `shmseg` - A shared memory segment ID created with xcb_generate_id().
 /// * `size` - The size of the segment to create.
 /// * `read_only` - True if the server should map the segment read-only; otherwise false.
-pub fn create_segment<Conn>(conn: &Conn, shmseg: Seg, size: u32, read_only: bool) -> Result<CookieWithFds<'_, Conn, CreateSegmentReply>, ConnectionError>
+pub fn create_segment<Conn>(
+    conn: &Conn,
+    shmseg: Seg,
+    size: u32,
+    read_only: bool,
+) -> Result<CookieWithFds<'_, Conn, CreateSegmentReply>, ConnectionError>
 where
     Conn: RequestConnection + ?Sized,
 {
@@ -288,8 +320,7 @@ pub trait ConnectionExt: RequestConnection {
     /// This is used to determine the version of the MIT-SHM extension supported by the
     /// X server.  Clients MUST NOT make other requests in this extension until a reply
     /// to this requests indicates the X server supports them.
-    fn shm_query_version(&self) -> Result<Cookie<'_, Self, QueryVersionReply>, ConnectionError>
-    {
+    fn shm_query_version(&self) -> Result<Cookie<'_, Self, QueryVersionReply>, ConnectionError> {
         query_version(self)
     }
     /// Attach a System V shared memory segment..
@@ -304,8 +335,12 @@ pub trait ConnectionExt: RequestConnection {
     /// * `shmseg` - A shared memory segment ID created with xcb_generate_id().
     /// * `shmid` - The System V shared memory segment the server should map.
     /// * `read_only` - True if the segment shall be mapped read only by the X11 server, otherwise false.
-    fn shm_attach(&self, shmseg: Seg, shmid: u32, read_only: bool) -> Result<VoidCookie<'_, Self>, ConnectionError>
-    {
+    fn shm_attach(
+        &self,
+        shmseg: Seg,
+        shmid: u32,
+        read_only: bool,
+    ) -> Result<VoidCookie<'_, Self>, ConnectionError> {
         attach(self, shmseg, shmid, read_only)
     }
     /// Destroys the specified shared memory segment..
@@ -316,8 +351,7 @@ pub trait ConnectionExt: RequestConnection {
     /// # Fields
     ///
     /// * `shmseg` - The segment to be destroyed.
-    fn shm_detach(&self, shmseg: Seg) -> Result<VoidCookie<'_, Self>, ConnectionError>
-    {
+    fn shm_detach(&self, shmseg: Seg) -> Result<VoidCookie<'_, Self>, ConnectionError> {
         detach(self, shmseg)
     }
     /// Copy data from the shared memory to the specified drawable..
@@ -351,9 +385,42 @@ pub trait ConnectionExt: RequestConnection {
     /// * `send_event` - True if the server should send an XCB_SHM_COMPLETION event when the blit
     ///   completes.
     /// * `offset` - The offset that the source image starts at.
-    fn shm_put_image(&self, drawable: xproto::Drawable, gc: xproto::Gcontext, total_width: u16, total_height: u16, src_x: u16, src_y: u16, src_width: u16, src_height: u16, dst_x: i16, dst_y: i16, depth: u8, format: u8, send_event: bool, shmseg: Seg, offset: u32) -> Result<VoidCookie<'_, Self>, ConnectionError>
-    {
-        put_image(self, drawable, gc, total_width, total_height, src_x, src_y, src_width, src_height, dst_x, dst_y, depth, format, send_event, shmseg, offset)
+    fn shm_put_image(
+        &self,
+        drawable: xproto::Drawable,
+        gc: xproto::Gcontext,
+        total_width: u16,
+        total_height: u16,
+        src_x: u16,
+        src_y: u16,
+        src_width: u16,
+        src_height: u16,
+        dst_x: i16,
+        dst_y: i16,
+        depth: u8,
+        format: u8,
+        send_event: bool,
+        shmseg: Seg,
+        offset: u32,
+    ) -> Result<VoidCookie<'_, Self>, ConnectionError> {
+        put_image(
+            self,
+            drawable,
+            gc,
+            total_width,
+            total_height,
+            src_x,
+            src_y,
+            src_width,
+            src_height,
+            dst_x,
+            dst_y,
+            depth,
+            format,
+            send_event,
+            shmseg,
+            offset,
+        )
     }
     /// Copies data from the specified drawable to the shared memory segment..
     ///
@@ -372,9 +439,21 @@ pub trait ConnectionExt: RequestConnection {
     /// * `format` - The format to use for the copy (???).
     /// * `shmseg` - The destination shared memory segment.
     /// * `offset` - The offset in the shared memory segment to copy data to.
-    fn shm_get_image(&self, drawable: xproto::Drawable, x: i16, y: i16, width: u16, height: u16, plane_mask: u32, format: u8, shmseg: Seg, offset: u32) -> Result<Cookie<'_, Self, GetImageReply>, ConnectionError>
-    {
-        get_image(self, drawable, x, y, width, height, plane_mask, format, shmseg, offset)
+    fn shm_get_image(
+        &self,
+        drawable: xproto::Drawable,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        plane_mask: u32,
+        format: u8,
+        shmseg: Seg,
+        offset: u32,
+    ) -> Result<Cookie<'_, Self, GetImageReply>, ConnectionError> {
+        get_image(
+            self, drawable, x, y, width, height, plane_mask, format, shmseg, offset,
+        )
     }
     /// Create a pixmap backed by shared memory..
     ///
@@ -391,8 +470,16 @@ pub trait ConnectionExt: RequestConnection {
     /// * `depth` - The depth of the pixmap to create.  Must be nonzero, or a Value error results.
     /// * `shmseg` - The shared memory segment to use to create the pixmap.
     /// * `offset` - The offset in the segment to create the pixmap at.
-    fn shm_create_pixmap(&self, pid: xproto::Pixmap, drawable: xproto::Drawable, width: u16, height: u16, depth: u8, shmseg: Seg, offset: u32) -> Result<VoidCookie<'_, Self>, ConnectionError>
-    {
+    fn shm_create_pixmap(
+        &self,
+        pid: xproto::Pixmap,
+        drawable: xproto::Drawable,
+        width: u16,
+        height: u16,
+        depth: u8,
+        shmseg: Seg,
+        offset: u32,
+    ) -> Result<VoidCookie<'_, Self>, ConnectionError> {
         create_pixmap(self, pid, drawable, width, height, depth, shmseg, offset)
     }
     /// Create a shared memory segment.
@@ -406,7 +493,12 @@ pub trait ConnectionExt: RequestConnection {
     /// * `shmseg` - A shared memory segment ID created with xcb_generate_id().
     /// * `shm_fd` - The file descriptor the server should mmap().
     /// * `read_only` - True if the segment shall be mapped read only by the X11 server, otherwise false.
-    fn shm_attach_fd<A>(&self, shmseg: Seg, shm_fd: A, read_only: bool) -> Result<VoidCookie<'_, Self>, ConnectionError>
+    fn shm_attach_fd<A>(
+        &self,
+        shmseg: Seg,
+        shm_fd: A,
+        read_only: bool,
+    ) -> Result<VoidCookie<'_, Self>, ConnectionError>
     where
         A: Into<RawFdContainer>,
     {
@@ -422,8 +514,12 @@ pub trait ConnectionExt: RequestConnection {
     /// * `shmseg` - A shared memory segment ID created with xcb_generate_id().
     /// * `size` - The size of the segment to create.
     /// * `read_only` - True if the server should map the segment read-only; otherwise false.
-    fn shm_create_segment(&self, shmseg: Seg, size: u32, read_only: bool) -> Result<CookieWithFds<'_, Self, CreateSegmentReply>, ConnectionError>
-    {
+    fn shm_create_segment(
+        &self,
+        shmseg: Seg,
+        size: u32,
+        read_only: bool,
+    ) -> Result<CookieWithFds<'_, Self, CreateSegmentReply>, ConnectionError> {
         create_segment(self, shmseg, size, read_only)
     }
 }
@@ -439,8 +535,7 @@ impl<C: RequestConnection + ?Sized> ConnectionExt for C {}
 #[derive(Debug)]
 pub struct SegWrapper<C: RequestConnection>(C, Seg);
 
-impl<C: RequestConnection> SegWrapper<C>
-{
+impl<C: RequestConnection> SegWrapper<C> {
     /// Assume ownership of the given resource and destroy it in `Drop`.
     pub fn for_seg(conn: C, id: Seg) -> Self {
         SegWrapper(conn, id)
@@ -461,8 +556,7 @@ impl<C: RequestConnection> SegWrapper<C>
     }
 }
 
-impl<'c, C: X11Connection> SegWrapper<&'c C>
-{
+impl<'c, C: X11Connection> SegWrapper<&'c C> {
     /// Create a new Seg and return a Seg wrapper and a cookie.
     ///
     /// This is a thin wrapper around [attach] that allocates an id for the Seg.
@@ -471,15 +565,17 @@ impl<'c, C: X11Connection> SegWrapper<&'c C>
     /// [attach].
     ///
     /// Errors can come from the call to [X11Connection::generate_id] or [attach].
-    pub fn attach_and_get_cookie(conn: &'c C, shmid: u32, read_only: bool) -> Result<(Self, VoidCookie<'c, C>), ReplyOrIdError>
-    {
+    pub fn attach_and_get_cookie(
+        conn: &'c C,
+        shmid: u32,
+        read_only: bool,
+    ) -> Result<(Self, VoidCookie<'c, C>), ReplyOrIdError> {
         let shmseg = conn.generate_id()?;
         let cookie = attach(conn, shmseg, shmid, read_only)?;
         Ok((Self::for_seg(conn, shmseg), cookie))
     }
 }
-impl<C: X11Connection> SegWrapper<C>
-{
+impl<C: X11Connection> SegWrapper<C> {
     /// Create a new Seg and return a Seg wrapper
     ///
     /// This is a thin wrapper around [attach] that allocates an id for the Seg.
@@ -487,16 +583,14 @@ impl<C: X11Connection> SegWrapper<C>
     /// it in `Drop`.
     ///
     /// Errors can come from the call to [X11Connection::generate_id] or [attach].
-    pub fn attach(conn: C, shmid: u32, read_only: bool) -> Result<Self, ReplyOrIdError>
-    {
+    pub fn attach(conn: C, shmid: u32, read_only: bool) -> Result<Self, ReplyOrIdError> {
         let shmseg = conn.generate_id()?;
         let _ = attach(&conn, shmseg, shmid, read_only)?;
         Ok(Self::for_seg(conn, shmseg))
     }
 }
 
-impl<'c, C: X11Connection> SegWrapper<&'c C>
-{
+impl<'c, C: X11Connection> SegWrapper<&'c C> {
     /// Create a new Seg and return a Seg wrapper and a cookie.
     ///
     /// This is a thin wrapper around [attach_fd] that allocates an id for the Seg.
@@ -505,7 +599,11 @@ impl<'c, C: X11Connection> SegWrapper<&'c C>
     /// [attach_fd].
     ///
     /// Errors can come from the call to [X11Connection::generate_id] or [attach_fd].
-    pub fn attach_fd_and_get_cookie<A>(conn: &'c C, shm_fd: A, read_only: bool) -> Result<(Self, VoidCookie<'c, C>), ReplyOrIdError>
+    pub fn attach_fd_and_get_cookie<A>(
+        conn: &'c C,
+        shm_fd: A,
+        read_only: bool,
+    ) -> Result<(Self, VoidCookie<'c, C>), ReplyOrIdError>
     where
         A: Into<RawFdContainer>,
     {
@@ -514,8 +612,7 @@ impl<'c, C: X11Connection> SegWrapper<&'c C>
         Ok((Self::for_seg(conn, shmseg), cookie))
     }
 }
-impl<C: X11Connection> SegWrapper<C>
-{
+impl<C: X11Connection> SegWrapper<C> {
     /// Create a new Seg and return a Seg wrapper
     ///
     /// This is a thin wrapper around [attach_fd] that allocates an id for the Seg.
