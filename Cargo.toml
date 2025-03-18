@@ -1,112 +1,12 @@
-[package]
-name = "x11rb"
-version = "0.4.1"
-description = "Rust bindings to X11"
-authors = [
-    "Uli Schlachter <psychon@znc.in>",
-    "Eduardo Sánchez Muñoz <esm@eduardosm.net>",
-]
-repository = "https://github.com/psychon/x11rb"
-readme = "README.md"
-edition = "2018"
-license = "MIT OR Apache-2.0"
-keywords = ["xcb", "X11"]
-exclude = [
-    "/xcb-proto-1.14-1-g2b3559c",
-    "/Makefile",
-    "/.mergify.yml",
-]
-
-[dependencies]
-libc = { version = "0.2", optional = true }
-gethostname = "0.2.1"
-
-[target.'cfg(unix)'.dependencies]
-nix = "0.17"
-
-[features]
-default = [
-    "allow-unsafe-code",
-]
-
-# Without this feature, all uses of `unsafe` in the crate are forbidden via
-# #![deny(unsafe_code)]. This has the effect of disabling the XCB FFI bindings.
-allow-unsafe-code = ["libc"]
-
-# Enable this feature to enable all the X11 extensions
-all-extensions = [
-    "composite",
-    "damage",
-    "dpms",
-    "dri2",
-    "dri3",
-    "glx",
-    "present",
-    "randr",
-    "record",
-    "render",
-    "res",
-    "screensaver",
-    "shape",
-    "shm",
-    "sync",
-    "xevie",
-    "xf86dri",
-    "xf86vidmode",
-    "xfixes",
-    "xinerama",
-    "xinput",
-    "xkb",
-    "xprint",
-    "xselinux",
-    "xtest",
-    "xv",
-    "xvmc",
-]
-
-# Features to enable individual X11 extensions
-composite = ["xfixes"]
-damage = ["xfixes"]
-dpms = []
-dri2 = []
-dri3 = []
-glx = []
-present = ["randr", "xfixes", "sync"]
-randr = ["render"]
-record = []
-render = []
-res = []
-screensaver = []
-shape = []
-shm = []
-sync = []
-xevie = []
-xf86dri = []
-xf86vidmode = []
-xfixes = ["render", "shape"]
-xinerama = []
-xinput = ["xfixes"]
-xkb = []
-xprint = []
-xselinux = []
-xtest = []
-xv = ["shm"]
-xvmc = ["xv"]
-
-[package.metadata.docs.rs]
-features = [ "all-extensions" ]
-
-[[example]]
-name = "generic_events"
-required-features = ["present"]
-
-[[example]]
-name = "shared_memory"
-required-features = ["libc", "shm"]
-
-[[example]]
-name = "xeyes"
-required-features = ["shape"]
-
 [workspace]
-members = ["generator", "xcbgen-rs", "cairo-example"]
+members = [
+    "generator",
+    "extract-generated-code-doc",
+    "xcbgen-rs",
+    "x11rb-protocol",
+    "x11rb",
+    "x11rb-async",
+    "cairo-example",
+    "xtrace-example",
+    "xkbcommon-example",
+]

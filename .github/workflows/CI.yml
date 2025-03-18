@@ -1,0 +1,271 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Midnight on the 1st of a month
+    - cron: '0 0 1 * *'
+
+env:
+  CARGO_TERM_COLOR: always
+  MOST_FEATURES: all-extensions cursor extra-traits image request-parsing tracing tracing-subscriber/env-filter
+  # According to code coverage changes, sometimes $XENVIRONMENT is set and
+  # sometimes not. Try to make this consistent to stabilise coverage reports.
+  # Example: https://app.codecov.io/gh/psychon/x11rb/compare/726/changes
+  XENVIRONMENT: this/file/does/not/exit
+
+jobs:
+  code_gen:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Clear src/protocol directories in x11rb, x11rb-async and x11rb-protocol
+      run: rm -rf x11rb/src/protocol/ x11rb-async/src/protocol/ x11rb-protocol/src/protocol/
+    - name: Run code generator
+      run: make
+    - name: Check for changes
+      run: if ! git diff --exit-code; then exit 1; fi
+
+  clippy:
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v4
+       - name: Install clippy
+         uses: dtolnay/rust-toolchain@beta
+         with:
+           components: clippy
+       - uses: giraffate/clippy-action@v1
+         with:
+           reporter: 'github-pr-review'
+           filter_mode: 'nofilter'
+           github_token: ${{ secrets.GITHUB_TOKEN }}
+           clippy_flags: --workspace --all-targets --all-features
+
+  clippy-rustfmt:
+     runs-on: ubuntu-latest
+     steps:
+       - name: Install cairo-rs dependencies
+         run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev libcairo2-dev
+       - uses: actions/checkout@v4
+       - name: Install rustfmt and clippy
+         uses: dtolnay/rust-toolchain@stable
+         with:
+           components: rustfmt, clippy
+
+       # rustfmt
+       - name: rustfmt
+         run: cargo fmt --all -- --check
+
+       # clippy
+       - name: clippy x11rb without features
+         run: cargo clippy -p x11rb --all-targets -- -D warnings ${{ matrix.clippy_args }}
+
+       - name: clippy x11rb without default features
+         run: cargo clippy -p x11rb --no-default-features --all-targets -- -D warnings ${{ matrix.clippy_args }}
+
+       - name: clippy x11rb-protocol with request parsing
+         run: cargo clippy -p x11rb-protocol --all-targets --features request-parsing -- -D warnings ${{ matrix.clippy_args }}
+
+       - name: clippy x11rb with allow-unsafe-code but without dl-libxcb
+         run: cargo clippy -p x11rb --all-targets --features "allow-unsafe-code" -- -D warnings ${{ matrix.clippy_args }}
+
+       - name: clippy x11rb with allow-unsafe-code and dl-libxcb
+         run: cargo clippy -p x11rb --all-targets --features "allow-unsafe-code dl-libxcb" -- -D warnings ${{ matrix.clippy_args }}
+
+       - name: clippy workspace with all features
+         run: cargo clippy --workspace --all-targets --all-features -- -D warnings ${{ matrix.clippy_args }}
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rust: stable
+          - rust: beta
+          - rust: nightly
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+
+    - name: Install profiling tools
+      if: matrix.rust == 'nightly'
+      run: rustup component add llvm-tools-preview
+
+    - name: Install grcov
+      if: matrix.rust == 'nightly'
+      run: cargo install grcov
+
+    - name: Install xkbcommon
+      run: sudo apt-get install libxkbcommon-x11-dev
+
+    # build
+    - name: cargo build with all features
+      run: cargo build --workspace --verbose --all-targets --all-features
+
+    # test no_std
+    - name: cargo test protocol with no default features
+      run: cargo test --manifest-path x11rb-protocol/Cargo.toml --no-default-features --features=all-extensions
+
+    - name: Add rustflag for instrument coverage
+      if: matrix.rust == 'nightly'
+      run: echo "RUSTFLAGS=-C instrument-coverage" >> $GITHUB_ENV
+
+    # test
+    - name: cargo test with all features
+      run: cargo test --workspace --verbose --all-features
+      env:
+        LLVM_PROFILE_FILE: coverage-%m.profraw
+
+    # doc
+    - name: cargo doc with all features
+      run: cargo doc --workspace --verbose --all-features
+
+    # run examples
+    - name: Prepare run examples
+      run: |
+          echo '#!/bin/bash
+              cd $1 || exit 1
+              shift
+              for example in examples/*.rs; do
+                  example=${example/examples\//}
+                  example=${example/.rs/}
+                  if [ "$example" != tutorial ] ; then
+                      X11RB_EXAMPLE_TIMEOUT=1 xvfb-run -a cargo run --example "$example" "$@" || exit 1
+                  fi
+              done
+          ' > run_examples && chmod a+x run_examples
+    - name: run x11rb examples with RustConnection
+      run: ./run_examples x11rb --features "$MOST_FEATURES libc"
+    - name: run x11rb examples with XCBConnection
+      run: ./run_examples x11rb --features "$MOST_FEATURES libc allow-unsafe-code"
+    - name: run x11rb examples with XCBConnection and dl-libxcb
+      run: ./run_examples x11rb --features "$MOST_FEATURES libc allow-unsafe-code dl-libxcb"
+    - name: run x11rb-async examples
+      run: ./run_examples x11rb-async --features "shm"
+
+    # run code generator in nightly builds for coverage
+    - name: Run code generator
+      if: matrix.rust == 'nightly'
+      run: make
+      env:
+        LLVM_PROFILE_FILE: coverage-%m.profraw
+
+    - name: Prepare coverage information for upload
+      if: matrix.rust == 'nightly'
+      run: grcov $(find ./ -type f -name "coverage-*.profraw") -s . --binary-path ./target/debug --branch --ignore-not-existing --ignore 'tests/*' -t coveralls+ --token ? -o ./coveralls.json
+    - name: Upload to codecov.io
+      if: matrix.rust == 'nightly'
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./coveralls.json
+        flags: tests
+        verbose: true
+      continue-on-error: true
+
+  msrv-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@1.63.0
+
+    # build
+    - name: cargo check x11rb-protocol with all features
+      run: cargo build --package x11rb-protocol --verbose --lib --all-features
+    - name: cargo check x11rb with all features
+      run: cargo build --package x11rb --verbose --lib --all-features
+    - name: cargo check x11rb-async with all features
+      run: cargo build --package x11rb-async --verbose --lib --all-features
+
+    # build no_std
+    - name: cargo check protocol without default features
+      run: cargo build --manifest-path x11rb-protocol/Cargo.toml --no-default-features --features=all-extensions
+
+  non-amd64-test:
+    runs-on: ubuntu-latest
+    env:
+      # used to test big endian and lack of 64-bit atomics
+      CROSS_TARGET: powerpc-unknown-linux-gnu
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Install cross rust
+      run: rustup target add "$CROSS_TARGET"
+    - name: Install cross
+      uses: taiki-e/install-action@cross
+    - name: cargo test on x11rb
+      run: cross test --target "$CROSS_TARGET" --verbose --package x11rb --features "$MOST_FEATURES"
+    - name: cargo test on x11rb with extra features
+      run: cross test --target "$CROSS_TARGET" --verbose --package x11rb --features "$MOST_FEATURES dl-libxcb"
+    - name: cargo test on x11rb-async
+      run: cross test --target "$CROSS_TARGET" --verbose --package x11rb-async --features "all-extensions"
+
+  # future-proof against issue #721
+  non-linux-unix-test:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Run tests
+      run: cargo test --verbose --package x11rb --features "$MOST_FEATURES"
+
+  windows-stable:
+    runs-on: windows-latest
+    env:
+      DISPLAY: 127.0.0.1:0
+      X11RB_EXAMPLE_TIMEOUT: 1
+    steps:
+    - run: git config --global core.autocrlf input
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+
+    - uses: cygwin/cygwin-install-action@v4
+      with:
+        packages: xorg-server-extra
+
+    # This uses libc::mmap and thus is Unix-only
+    - name: disable unix-only shared_memory example
+      run: del x11rb\examples\shared_memory.rs ; del x11rb-async\examples\shared_memory_async.rs
+
+    - name: Create a fake "shared_memory" because it is referenced in Cargo.toml
+      run: Copy-Item "x11rb\examples\simple_window.rs" -Destination "x11rb\examples\shared_memory.rs" ; Copy-Item "x11rb-async\examples\xclock_utc_async.rs" -Destination "x11rb-async\examples\shared_memory_async.rs"
+
+    # We do not have libxcb and thus cannot build XCBConnection
+    - name: cargo build x11rb with all features
+      run: cargo check -p x11rb --verbose --all-targets --features all-extensions,cursor,image,tracing,tracing-subscriber/env-filter
+    - name: cargo build x11rb-async with all features
+      run: cargo check -p x11rb-async --verbose --all-targets --features all-extensions
+
+    - name: Start an X11 server in the background
+      shell: pwsh
+      run: $Server = Start-Process -PassThru -FilePath C:\cygwin\bin\Xvfb.exe -ArgumentList "-listen tcp :0"
+
+    # Run the examples as integration tests.
+    # If you know some PowerShell programming, feel free to simplify this. This is
+    # the first time I touched PowerShell and I hope not to touch it again any
+    # time soon. Requirements include "must fail if the command fails".
+    - name: run x11rb examples
+      shell: pwsh
+      run: |
+        Get-ChildItem x11rb\examples | Where {$_.extension -eq ".rs"} | Where {$_.BaseName -ne "tutorial"} | Where {$_.BaseName -ne "shared_memory"} | Foreach-Object {
+          $cmd = "cargo run --verbose --package x11rb --features all-extensions,cursor,image,tracing,tracing-subscriber/env-filter --example $($_.BaseName) 2>&1"
+          Write-Host -ForegroundColor Yellow $cmd
+          $backupErrorActionPreference = $script:ErrorActionPreference
+          $script:ErrorActionPreference = "Continue"
+          try
+          {
+            cmd /c "$cmd" | ForEach-Object { "$_" }
+            if ($LASTEXITCODE -ne 0)
+            {
+              throw "Execution failed with exit code $LASTEXITCODE for $cmd"
+            }
+          }
+          finally
+          {
+            $script:ErrorActionPreference = $backupErrorActionPreference
+          }
+        }

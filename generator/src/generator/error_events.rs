@@ -1,3 +1,4 @@
+use super::get_ns_name_prefix;
 use super::output::Output;
 
 pub(super) fn generate(out: &mut Output, module: &xcbgen::defs::Module) {
@@ -14,24 +15,9 @@ pub(super) fn generate(out: &mut Output, module: &xcbgen::defs::Module) {
         "fn response_type(raw_bytes: &[u8]) -> Result<u8, ParseError> {{"
     );
     out.indented(|out| {
-        outln!(out, "raw_bytes.get(0)");
+        outln!(out, "raw_bytes.first()");
         outln!(out.indent(), ".map(|x| x & 0x7f)");
-        outln!(out.indent(), ".ok_or(ParseError::ParseError)");
-    });
-    outln!(out, "}}");
-    outln!(out, "");
-    outln!(
-        out,
-        "/// Get the error code out of the raw bytes of an X11 error."
-    );
-    outln!(
-        out,
-        "fn error_code(raw_bytes: &[u8]) -> Result<u8, ParseError> {{"
-    );
-    out.indented(|out| {
-        outln!(out, "raw_bytes.get(1)");
-        outln!(out.indent(), ".copied()");
-        outln!(out.indent(), ".ok_or(ParseError::ParseError)");
+        outln!(out.indent(), ".ok_or(ParseError::InsufficientData)");
     });
     outln!(out, "}}");
     outln!(out, "");
@@ -46,7 +32,7 @@ pub(super) fn generate(out: &mut Output, module: &xcbgen::defs::Module) {
             out.indent(),
             ".map(|b| u16::from_ne_bytes(b.try_into().unwrap()))"
         );
-        outln!(out.indent(), ".ok_or(ParseError::ParseError)");
+        outln!(out.indent(), ".ok_or(ParseError::InsufficientData)");
     });
     outln!(out, "}}");
 }
@@ -54,12 +40,15 @@ pub(super) fn generate(out: &mut Output, module: &xcbgen::defs::Module) {
 fn generate_errors(out: &mut Output, module: &xcbgen::defs::Module) {
     let namespaces = module.sorted_namespaces();
 
-    outln!(out, "/// Enumeration of all possible X11 errors.");
-    outln!(out, "#[derive(Debug, Clone)]");
-    outln!(out, "pub enum Error<B: std::fmt::Debug + AsRef<[u8]>> {{");
+    outln!(out, "/// Enumeration of all possible X11 error kinds.");
+    outln!(
+        out,
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]"
+    );
+    outln!(out, "#[non_exhaustive]");
+    outln!(out, "pub enum ErrorKind {{");
     out.indented(|out| {
-        outln!(out, "Unknown(B),");
-
+        outln!(out, "Unknown(u8),");
         for ns in namespaces.iter() {
             let has_feature = super::ext_has_feature(&ns.header);
             let error_defs = sorted_errors(ns);
@@ -68,33 +57,20 @@ fn generate_errors(out: &mut Output, module: &xcbgen::defs::Module) {
                 if has_feature {
                     outln!(out, "#[cfg(feature = \"{}\")]", ns.header);
                 }
-                outln!(
-                    out,
-                    "{}{}({}::{}Error),",
-                    get_ns_name_prefix(ns),
-                    err_name,
-                    ns.header,
-                    err_name,
-                );
+                outln!(out, "{}{},", get_ns_name_prefix(ns), err_name);
             }
         }
     });
     outln!(out, "}}");
     outln!(out, "");
-    outln!(out, "impl<B: std::fmt::Debug + AsRef<[u8]>> Error<B> {{");
+    outln!(out, "impl ErrorKind {{");
     out.indented(|out| {
-        outln!(
-            out,
-            "/// Parse a generic X11 error into a concrete error type."
-        );
-        outln!(out, "#[allow(clippy::cognitive_complexity)]");
-        outln!(out, "pub fn parse(");
-        outln!(out.indent(), "error: B,");
+        outln!(out, "#[allow(clippy::match_single_binding)]");
+        outln!(out, "pub fn from_wire_error_code(");
+        outln!(out.indent(), "error_code: u8,");
         outln!(out.indent(), "ext_info_provider: &dyn ExtInfoProvider,");
-        outln!(out, ") -> Result<Self, ParseError> {{");
+        outln!(out, ") -> Self {{");
         out.indented(|out| {
-            outln!(out, "let error_code = error_code(error.as_ref())?;");
-            outln!(out, "");
             outln!(out, "// Check if this is a core protocol error");
             outln!(out, "match error_code {{");
             out.indented(|out| {
@@ -103,7 +79,7 @@ fn generate_errors(out: &mut Output, module: &xcbgen::defs::Module) {
                 for err_name in error_defs.iter().map(|def| def.name()) {
                     outln!(
                         out,
-                        "xproto::{}_ERROR => return Ok(Self::{}(error.as_ref().try_into()?)),",
+                        "xproto::{}_ERROR => return Self::{},",
                         super::camel_case_to_upper_snake(err_name),
                         err_name,
                     );
@@ -143,115 +119,26 @@ fn generate_errors(out: &mut Output, module: &xcbgen::defs::Module) {
                         for err_name in error_defs.iter().map(|def| def.name()) {
                             outln!(
                                 out.indent(),
-                                "{}::{}_ERROR => Ok(Self::{}{}(error.as_ref().try_into()?)),",
+                                "{}::{}_ERROR => Self::{}{},",
                                 ns.header,
                                 super::camel_case_to_upper_snake(err_name),
                                 get_ns_name_prefix(ns),
                                 err_name,
                             );
                         }
-                        outln!(out.indent(), "_ => Ok(Self::Unknown(error)),");
+                        outln!(out.indent(), "_ => Self::Unknown(error_code),");
                         outln!(out, "}}");
                     });
                     outln!(out, "}}");
                 }
-                outln!(out, "_ => Ok(Self::Unknown(error)),");
+                outln!(out, "_ => Self::Unknown(error_code),");
             });
             outln!(out, "}}")
         });
         outln!(out, "}}");
-        outln!(out, "");
-        outln!(
-            out,
-            "/// Get the sequence number contained in this X11 error",
-        );
-        outln!(out, "pub fn wire_sequence_number(&self) -> u16 {{");
-        out.indented(|out| {
-            outln!(out, "match self {{");
-            outln!(
-                out.indent(),
-                "Error::Unknown(value) => sequence_number(value.as_ref()).unwrap(),",
-            );
-            for ns in namespaces.iter() {
-                let has_feature = super::ext_has_feature(&ns.header);
-                let error_defs = sorted_errors(ns);
-
-                for err_name in error_defs.iter().map(|def| def.name()) {
-                    if has_feature {
-                        outln!(out.indent(), "#[cfg(feature = \"{}\")]", ns.header);
-                    }
-                    outln!(
-                        out.indent(),
-                        "Error::{}{}(value) => value.sequence,",
-                        get_ns_name_prefix(ns),
-                        err_name,
-                    );
-                }
-            }
-            outln!(out, "}}");
-        });
-        outln!(out, "}}");
-        outln!(out, "");
-        outln!(out, "/// Get the error code of this X11 error");
-        outln!(out, "pub fn error_code(&self) -> u8 {{");
-        out.indented(|out| {
-            outln!(out, "match self {{");
-            outln!(
-                out.indent(),
-                "Error::Unknown(value) => error_code(value.as_ref()).unwrap(),"
-            );
-            for ns in namespaces.iter() {
-                let has_feature = super::ext_has_feature(&ns.header);
-                let error_defs = sorted_errors(ns);
-                for err_name in error_defs.iter().map(|def| def.name()) {
-                    if has_feature {
-                        outln!(out.indent(), "#[cfg(feature = \"{}\")]", ns.header);
-                    }
-                    outln!(
-                        out.indent(),
-                        "Error::{}{}(value) => value.error_code,",
-                        get_ns_name_prefix(ns),
-                        err_name,
-                    );
-                }
-            }
-            outln!(out, "}}");
-        });
-        outln!(out, "}}");
-        outln!(out, "");
-        outln!(out, "/// Get the response type of this X11 error");
-        outln!(out, "///");
-        outln!(
-            out,
-            "/// This is not `pub` because it should always be `0` for errors.",
-        );
-        outln!(out, "fn raw_response_type(&self) -> u8 {{");
-        out.indented(|out| {
-            outln!(out, "match self {{");
-            outln!(
-                out.indent(),
-                "Error::Unknown(value) => response_type(value.as_ref()).unwrap(),"
-            );
-            for ns in namespaces.iter() {
-                let has_feature = super::ext_has_feature(&ns.header);
-                let error_defs = sorted_errors(ns);
-                for err_name in error_defs.iter().map(|def| def.name()) {
-                    if has_feature {
-                        outln!(out.indent(), "#[cfg(feature = \"{}\")]", ns.header);
-                    }
-                    outln!(
-                        out.indent(),
-                        "Error::{}{}(value) => value.response_type,",
-                        get_ns_name_prefix(ns),
-                        err_name,
-                    );
-                }
-            }
-            outln!(out, "}}");
-        });
-        outln!(out, "}}");
     });
     outln!(out, "}}");
+    outln!(out, "");
 }
 
 fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
@@ -259,10 +146,11 @@ fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
 
     outln!(out, "/// Enumeration of all possible X11 events.");
     outln!(out, "#[derive(Debug, Clone)]");
-    outln!(out, "pub enum Event<B: std::fmt::Debug + AsRef<[u8]>> {{");
+    outln!(out, "#[non_exhaustive]");
+    outln!(out, "pub enum Event {{");
     out.indented(|out| {
-        outln!(out, "Unknown(B),");
-        outln!(out, "Error(Error<B>),");
+        outln!(out, "Unknown(Vec<u8>),");
+        outln!(out, "Error(X11Error),");
 
         for ns in namespaces.iter() {
             let has_feature = super::ext_has_feature(&ns.header);
@@ -284,19 +172,22 @@ fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
     });
     outln!(out, "}}");
     outln!(out, "");
-    outln!(out, "impl<B: std::fmt::Debug + AsRef<[u8]>> Event<B> {{");
+    outln!(out, "impl Event {{");
     out.indented(|out| {
         outln!(
             out,
             "/// Parse a generic X11 event into a concrete event type."
         );
-        outln!(out, "#[allow(clippy::cognitive_complexity)]");
+        outln!(
+            out,
+            "#[allow(clippy::cognitive_complexity, clippy::match_single_binding)]",
+        );
         outln!(out, "pub fn parse(");
-        outln!(out.indent(), "event: B,");
+        outln!(out.indent(), "event: &[u8],");
         outln!(out.indent(), "ext_info_provider: &dyn ExtInfoProvider,");
         outln!(out, ") -> Result<Self, ParseError> {{");
         out.indented(|out| {
-            outln!(out, "let event_code = response_type(event.as_ref())?;");
+            outln!(out, "let event_code = response_type(event)?;");
             outln!(out, "");
             outln!(
                 out,
@@ -308,7 +199,7 @@ fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
                 outln!(
                     out,
                     "0 => return Ok({}),",
-                    "Self::Error(Error::parse(event, ext_info_provider)?)",
+                    "Self::Error(X11Error::try_parse(event, ext_info_provider)?)",
                 );
                 let xproto_ns = module.namespace("xproto").unwrap();
                 let event_defs = sorted_events(&xproto_ns);
@@ -319,7 +210,7 @@ fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
                     }
                     outln!(
                         out,
-                        "xproto::{}_EVENT => return Ok(Self::{}(event.as_ref().try_into()?)),",
+                        "xproto::{}_EVENT => return Ok(Self::{}(TryParse::try_parse(event)?.0)),",
                         super::camel_case_to_upper_snake(event_name),
                         event_name,
                     );
@@ -362,11 +253,11 @@ fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
                     out.indented(|out| {
                         if ns.header == "xkb" {
                             outln!(out, "if event_code != ext_info.first_event {{");
-                            outln!(out.indent(), "return Ok(Self::Unknown(event));");
+                            outln!(out.indent(), "return Ok(Self::Unknown(event.to_vec()));");
                             outln!(out, "}}");
                             outln!(
                                 out,
-                                "match *event.as_ref().get(1).ok_or(ParseError::ParseError)? {{"
+                                "match *event.get(1).ok_or(ParseError::InsufficientData)? {{"
                             );
                         } else {
                             outln!(out, "match event_code - ext_info.first_event {{");
@@ -377,33 +268,34 @@ fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
                             }
                             outln!(
                                 out.indent(),
-                                "{}::{}_EVENT => Ok(Self::{}{}(event.as_ref().try_into()?)),",
+                                "{}::{}_EVENT => Ok(Self::{}{}(TryParse::try_parse(event)?.0)),",
                                 ns.header,
                                 super::camel_case_to_upper_snake(event_def.name()),
                                 get_ns_name_prefix(ns),
                                 event_def.name(),
                             );
                         }
-                        outln!(out.indent(), "_ => Ok(Self::Unknown(event)),");
+                        outln!(out.indent(), "_ => Ok(Self::Unknown(event.to_vec())),");
                         outln!(out, "}}");
                     });
                     outln!(out, "}}");
                 }
-                outln!(out, "_ => Ok(Self::Unknown(event)),");
+                outln!(out, "_ => Ok(Self::Unknown(event.to_vec())),");
             });
             outln!(out, "}}");
         });
         outln!(out, "}}");
         outln!(out, "");
 
+        outln!(out, "#[allow(clippy::match_single_binding)]");
         outln!(out, "fn from_generic_event(");
-        outln!(out.indent(), "event: B,");
+        outln!(out.indent(), "event: &[u8],");
         outln!(out.indent(), "ext_info_provider: &dyn ExtInfoProvider,");
         outln!(out, ") -> Result<Self, ParseError> {{");
         out.indented(|out| {
             outln!(
                 out,
-                "let ge_event = xproto::GeGenericEvent::try_from(event.as_ref())?;"
+                "let ge_event = xproto::GeGenericEvent::try_parse(event)?.0;"
             );
             outln!(out, "let ext_name = ext_info_provider");
             outln!(out.indent(), ".get_from_major_opcode(ge_event.extension)");
@@ -433,19 +325,19 @@ fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
                             }
                             outln!(
                                 out.indent(),
-                                "{}::{}_EVENT => Ok(Self::{}{}(event.as_ref().try_into()?)),",
+                                "{}::{}_EVENT => Ok(Self::{}{}(TryParse::try_parse(event)?.0)),",
                                 ns.header,
                                 super::camel_case_to_upper_snake(event_def.name()),
                                 get_ns_name_prefix(ns),
                                 event_def.name(),
                             );
                         }
-                        outln!(out.indent(), "_ => Ok(Self::Unknown(event)),");
+                        outln!(out.indent(), "_ => Ok(Self::Unknown(event.to_vec())),");
                         outln!(out, "}}");
                     });
                     outln!(out, "}}");
                 }
-                outln!(out, "_ => Ok(Self::Unknown(event)),");
+                outln!(out, "_ => Ok(Self::Unknown(event.to_vec())),");
             });
             outln!(out, "}}");
         });
@@ -461,12 +353,9 @@ fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
             outln!(out, "match self {{");
             outln!(
                 out.indent(),
-                "Event::Unknown(value) => sequence_number(value.as_ref()).ok(),",
+                "Event::Unknown(value) => sequence_number(value).ok(),",
             );
-            outln!(
-                out.indent(),
-                "Event::Error(value) => Some(value.wire_sequence_number()),",
-            );
+            outln!(out.indent(), "Event::Error(value) => Some(value.sequence),");
             for ns in namespaces.iter() {
                 let event_defs = sorted_events(ns);
                 let has_feature = super::ext_has_feature(&ns.header);
@@ -517,12 +406,9 @@ fn generate_events(out: &mut Output, module: &xcbgen::defs::Module) {
             outln!(out, "match self {{");
             outln!(
                 out.indent(),
-                "Event::Unknown(value) => response_type(value.as_ref()).unwrap(),",
+                "Event::Unknown(value) => response_type(value).unwrap(),",
             );
-            outln!(
-                out.indent(),
-                "Event::Error(value) => value.raw_response_type(),",
-            );
+            outln!(out.indent(), "Event::Error(_) => 0,");
             for ns in namespaces.iter() {
                 let event_defs = sorted_events(ns);
                 let has_feature = super::ext_has_feature(&ns.header);
@@ -568,18 +454,6 @@ pub fn sent_event(&self) -> bool {{
         );
     });
     outln!(out, "}}");
-}
-
-/// Get the prefix that should be used for enum variants from this module.
-fn get_ns_name_prefix(ns: &xcbgen::defs::Namespace) -> String {
-    if ns.ext_info.is_some() {
-        let (first, remaining) = ns.header.split_at(1);
-        let mut r = first.to_ascii_uppercase();
-        r.push_str(remaining);
-        r
-    } else {
-        String::new()
-    }
 }
 
 fn sorted_errors(ns: &xcbgen::defs::Namespace) -> Vec<xcbgen::defs::ErrorDef> {

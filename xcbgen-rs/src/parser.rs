@@ -1,32 +1,75 @@
+//! Parser for protocol XML descriptions.
+//!
+//! This module contains the [`Parser`] that allows parsing a [`roxmltree::Node`] into a
+//! [`defs::Module`].
+
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::str::FromStr as _;
+use std::str::FromStr;
 
 use once_cell::unsync::OnceCell;
 
 use crate::defs;
 
-#[derive(Debug)]
+/// An error that occurred while parsing an error.
+#[derive(Debug, Clone, Copy)]
 pub enum ParseError {
+    /// The XML tree is in some way malformed.
+    ///
+    /// Possible errors include missing or duplicate tags, or tags that were not understood, among
+    /// others.
     InvalidXml,
+
+    /// The module already contains a namespace with this header name.
     RepeatedHeaderName,
-    RepeatedRequestName,
-    RepeatedEventName,
-    RepeatedErrorName,
+
+    /// Some type was specified multiple times.
+    ///
+    /// An example for this error is two requests with the same name.
     RepeatedTypeName,
+
+    /// A `<pad>` field is invalid.
+    ///
+    /// A `<pad>` must contain either a `bytes` or `align` attribute. This property was violated.
     InvalidPad,
+
+    /// A `<pad align= >` has an invalid value (i.e., `align` is not
+    /// a power of two).
+    InvalidPadAlign,
+
+    /// A `<field>` contains an invalid set of properties.
+    ///
+    /// At most one of the attributes `enum`, `altenum`, `mask`, or `altmask` may be present.
+    /// However, some field had more than this.
     InvalidFieldValueSet,
+
+    /// A `<required_start_align>` has an invalid value (i.e., `align` is not a power of two
+    /// or `offset` is equal or greater than `align`).
+    InvalidRequiredStartAlign,
 }
 
+/// A `Parser` that adds namespaces to a module.
+///
+/// One instance of this struct can be used to parse multiple namespaces, one after another.
+#[derive(Debug)]
 pub struct Parser {
     module: Rc<defs::Module>,
 }
 
 impl Parser {
+    /// Create a new parser that adds its information to the given module
     pub fn new(module: Rc<defs::Module>) -> Self {
         Self { module }
     }
 
+    /// Parse an XML tree.
+    ///
+    /// This function parses the XML tree that is described by the given `node`. This `node` must
+    /// describe a complete namespace, which means that it should correspond to the root tag of an
+    /// XML document.
+    ///
+    /// The resulting namespace is added to the module that this parser was constructed for. A
+    /// reference to the namespace is also returned.
     pub fn parse_namespace(
         &mut self,
         node: roxmltree::Node<'_, '_>,
@@ -41,13 +84,11 @@ impl Parser {
             .attribute("extension-xname")
             .map::<Result<defs::ExtInfo, ParseError>, _>(|xname| {
                 let name = get_attr(node, "extension-name")?;
-                let multiword = try_get_attr_as_bool(node, "extension-multiword")?.unwrap_or(false);
-                let major_version = get_attr_as_u16(node, "major-version")?;
-                let minor_version = get_attr_as_u16(node, "minor-version")?;
+                let major_version = get_attr_parsed(node, "major-version")?;
+                let minor_version = get_attr_parsed(node, "minor-version")?;
                 Ok(defs::ExtInfo {
                     xname: xname.into(),
                     name: name.into(),
-                    multiword,
                     major_version,
                     minor_version,
                 })
@@ -100,8 +141,8 @@ impl Parser {
         assert!(node.is_element());
 
         let name = get_attr(node, "name")?;
-        let opcode = get_attr_as_u8(node, "opcode")?;
-        let combine_adjacent = try_get_attr_as_bool(node, "combine-adjacent")?.unwrap_or(false);
+        let opcode = get_attr_parsed(node, "opcode")?;
+        let combine_adjacent = try_get_attr_parsed(node, "combine-adjacent")?.unwrap_or(false);
 
         let mut required_start_align = None;
         let mut fields = Vec::new();
@@ -148,12 +189,9 @@ impl Parser {
         if let Some(ref reply) = request.reply {
             reply.request.set(Rc::downgrade(&request)).unwrap();
         }
-        if !ns.insert_request_def(name.into(), request.clone()) {
+        if !ns.insert_request_def(name.into(), request) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Request(request));
             Ok(())
         }
     }
@@ -206,9 +244,9 @@ impl Parser {
         assert!(node.is_element());
 
         let name = get_attr(node, "name")?;
-        let number = get_attr_as_u16(node, "number")?;
-        let no_sequence_number = try_get_attr_as_bool(node, "no-sequence-number")?.unwrap_or(false);
-        let xge = try_get_attr_as_bool(node, "xge")?.unwrap_or(false);
+        let number = get_attr_parsed(node, "number")?;
+        let no_sequence_number = try_get_attr_parsed(node, "no-sequence-number")?.unwrap_or(false);
+        let xge = try_get_attr_parsed(node, "xge")?.unwrap_or(false);
 
         let mut required_start_align = None;
         let mut fields = Vec::new();
@@ -246,12 +284,9 @@ impl Parser {
             fields: RefCell::new(fields),
             doc,
         });
-        if !ns.insert_event_def(name.into(), defs::EventDef::Full(event_full.clone())) {
+        if !ns.insert_event_def(name.into(), defs::EventDef::Full(event_full)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Event(defs::EventDef::Full(event_full)));
             Ok(())
         }
     }
@@ -264,7 +299,7 @@ impl Parser {
         assert!(node.is_element());
 
         let name = get_attr(node, "name")?;
-        let number = get_attr_as_u16(node, "number")?;
+        let number = get_attr_parsed(node, "number")?;
         let ref_ = get_attr(node, "ref")?;
 
         let event_copy = Rc::new(defs::EventCopyDef {
@@ -273,12 +308,9 @@ impl Parser {
             number,
             ref_: defs::NamedEventRef::unresolved(ref_.into()),
         });
-        if !ns.insert_event_def(name.into(), defs::EventDef::Copy(event_copy.clone())) {
+        if !ns.insert_event_def(name.into(), defs::EventDef::Copy(event_copy)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Event(defs::EventDef::Copy(event_copy)));
             Ok(())
         }
     }
@@ -291,7 +323,7 @@ impl Parser {
         assert!(node.is_element());
 
         let name = get_attr(node, "name")?;
-        let number = get_attr_as_i16(node, "number")?;
+        let number = get_attr_parsed(node, "number")?;
 
         let mut required_start_align = None;
         let mut fields = Vec::new();
@@ -320,12 +352,9 @@ impl Parser {
             required_start_align,
             fields: RefCell::new(fields),
         });
-        if !ns.insert_error_def(name.into(), defs::ErrorDef::Full(error_full.clone())) {
+        if !ns.insert_error_def(name.into(), defs::ErrorDef::Full(error_full)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Error(defs::ErrorDef::Full(error_full)));
             Ok(())
         }
     }
@@ -338,7 +367,7 @@ impl Parser {
         assert!(node.is_element());
 
         let name = get_attr(node, "name")?;
-        let number = get_attr_as_i16(node, "number")?;
+        let number = get_attr_parsed(node, "number")?;
         let ref_ = get_attr(node, "ref")?;
 
         let error_copy = Rc::new(defs::ErrorCopyDef {
@@ -347,12 +376,9 @@ impl Parser {
             number,
             ref_: defs::NamedErrorRef::unresolved(ref_.into()),
         });
-        if !ns.insert_error_def(name.into(), defs::ErrorDef::Copy(error_copy.clone())) {
+        if !ns.insert_error_def(name.into(), defs::ErrorDef::Copy(error_copy)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Error(defs::ErrorDef::Copy(error_copy)));
             Ok(())
         }
     }
@@ -366,6 +392,7 @@ impl Parser {
 
         let name = get_attr(node, "name")?;
 
+        let mut length_expr = None;
         let mut fields = Vec::new();
 
         for child_node in node.children() {
@@ -373,7 +400,16 @@ impl Parser {
                 continue;
             }
 
-            if let Some(field) = self.try_parse_field_def(child_node)? {
+            if child_node.has_tag_name("length") {
+                if length_expr.is_some() {
+                    return Err(ParseError::InvalidXml);
+                }
+
+                let expr_node = child_node
+                    .first_element_child()
+                    .ok_or(ParseError::InvalidXml)?;
+                length_expr = Some(self.parse_expression(expr_node)?);
+            } else if let Some(field) = self.try_parse_field_def(child_node)? {
                 fields.push(field);
             } else {
                 return Err(ParseError::InvalidXml);
@@ -384,15 +420,13 @@ impl Parser {
             namespace: Rc::downgrade(ns),
             name: name.into(),
             alignment: OnceCell::new(),
+            length_expr,
             fields: RefCell::new(fields),
             external_params: RefCell::new(Vec::new()),
         });
-        if !ns.insert_type_def(name.into(), defs::TypeDef::Struct(struct_.clone())) {
+        if !ns.insert_type_def(name.into(), defs::TypeDef::Struct(struct_)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Type(defs::TypeDef::Struct(struct_)));
             Ok(())
         }
     }
@@ -426,12 +460,9 @@ impl Parser {
             alignment: OnceCell::new(),
             fields,
         });
-        if !ns.insert_type_def(name.into(), defs::TypeDef::Union(union.clone())) {
+        if !ns.insert_type_def(name.into(), defs::TypeDef::Union(union)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Type(defs::TypeDef::Union(union)));
             Ok(())
         }
     }
@@ -464,15 +495,9 @@ impl Parser {
             name: name.into(),
             alloweds,
         });
-        if !ns.insert_type_def(
-            name.into(),
-            defs::TypeDef::EventStruct(event_struct.clone()),
-        ) {
+        if !ns.insert_type_def(name.into(), defs::TypeDef::EventStruct(event_struct)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Type(defs::TypeDef::EventStruct(event_struct)));
             Ok(())
         }
     }
@@ -484,9 +509,9 @@ impl Parser {
         assert!(node.is_element());
 
         let extension = get_attr(node, "extension")?;
-        let xge = get_attr_as_bool(node, "xge")?;
-        let opcode_min = get_attr_as_u16(node, "opcode-min")?;
-        let opcode_max = get_attr_as_u16(node, "opcode-max")?;
+        let xge = get_attr_parsed(node, "xge")?;
+        let opcode_min = get_attr_parsed(node, "opcode-min")?;
+        let opcode_max = get_attr_parsed(node, "opcode-max")?;
 
         Ok(defs::EventStructAllowed {
             extension: extension.into(),
@@ -510,12 +535,9 @@ impl Parser {
             namespace: Rc::downgrade(ns),
             name: name.into(),
         });
-        if !ns.insert_type_def(name.into(), defs::TypeDef::Xid(xid_type.clone())) {
+        if !ns.insert_type_def(name.into(), defs::TypeDef::Xid(xid_type)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Type(defs::TypeDef::Xid(xid_type)));
             Ok(())
         }
     }
@@ -548,12 +570,9 @@ impl Parser {
             name: name.into(),
             types,
         });
-        if !ns.insert_type_def(name.into(), defs::TypeDef::XidUnion(xid_union.clone())) {
+        if !ns.insert_type_def(name.into(), defs::TypeDef::XidUnion(xid_union)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Type(defs::TypeDef::XidUnion(xid_union)));
             Ok(())
         }
     }
@@ -592,12 +611,9 @@ impl Parser {
             items,
             doc,
         });
-        if !ns.insert_type_def(name.into(), defs::TypeDef::Enum(enum_.clone())) {
+        if !ns.insert_type_def(name.into(), defs::TypeDef::Enum(enum_)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Type(defs::TypeDef::Enum(enum_)));
             Ok(())
         }
     }
@@ -621,13 +637,13 @@ impl Parser {
                 if value.is_some() {
                     return Err(ParseError::InvalidXml);
                 }
-                let v = get_text_as_u32(child_node)?;
+                let v = get_text_parsed(child_node)?;
                 value = Some(defs::EnumValue::Value(v));
             } else if child_node.has_tag_name("bit") {
                 if value.is_some() {
                     return Err(ParseError::InvalidXml);
                 }
-                let bit = get_text_as_u8(child_node)?;
+                let bit = get_text_parsed(child_node)?;
                 if bit >= 32 {
                     return Err(ParseError::InvalidXml);
                 }
@@ -637,7 +653,7 @@ impl Parser {
             }
         }
 
-        let value = value.ok_or_else(|| ParseError::InvalidXml)?;
+        let value = value.ok_or(ParseError::InvalidXml)?;
 
         Ok(defs::EnumItem {
             name: name.into(),
@@ -661,12 +677,9 @@ impl Parser {
             old_name,
             new_name: new_name.into(),
         });
-        if !ns.insert_type_def(new_name.into(), defs::TypeDef::Alias(type_alias.clone())) {
+        if !ns.insert_type_def(new_name.into(), defs::TypeDef::Alias(type_alias)) {
             Err(ParseError::RepeatedTypeName)
         } else {
-            ns.src_order_defs
-                .borrow_mut()
-                .push(defs::Def::Type(defs::TypeDef::Alias(type_alias)));
             Ok(())
         }
     }
@@ -683,13 +696,18 @@ impl Parser {
 
         match node.tag_name().name() {
             "pad" => {
-                let bytes = try_get_attr_as_u16(node, "bytes")?;
-                let align = try_get_attr_as_u16(node, "align")?;
-                let serialize = try_get_attr_as_bool(node, "serialize")?.unwrap_or(false);
+                let bytes = try_get_attr_parsed(node, "bytes")?;
+                let align = try_get_attr_parsed::<u16>(node, "align")?;
+                let serialize = try_get_attr_parsed(node, "serialize")?.unwrap_or(false);
 
                 let pad_kind = match (bytes, align) {
                     (Some(bytes), None) => defs::PadKind::Bytes(bytes),
-                    (None, Some(align)) => defs::PadKind::Align(align),
+                    (None, Some(align)) => {
+                        if !align.is_power_of_two() {
+                            return Err(ParseError::InvalidPadAlign);
+                        }
+                        defs::PadKind::Align(align)
+                    }
                     _ => return Err(ParseError::InvalidPad),
                 };
                 Ok(Some(defs::FieldDef::Pad(defs::PadField {
@@ -714,10 +732,10 @@ impl Parser {
                     .map(|expr_node| self.parse_expression(expr_node))
                     .transpose()?;
 
-                if element_type.type_.name == "fd" {
+                if element_type.type_.name() == "fd" {
                     Ok(Some(defs::FieldDef::FdList(defs::FdListField {
                         name: name.into(),
-                        length_expr: length_expr.ok_or_else(|| ParseError::InvalidXml)?,
+                        length_expr: length_expr.ok_or(ParseError::InvalidXml)?,
                     })))
                 } else {
                     Ok(Some(defs::FieldDef::List(defs::ListField {
@@ -771,8 +789,8 @@ impl Parser {
                     }
                 }
 
-                let expr = expr.ok_or_else(|| ParseError::InvalidXml)?;
-                let kind = kind.ok_or_else(|| ParseError::InvalidXml)?;
+                let expr = expr.ok_or(ParseError::InvalidXml)?;
+                let kind = kind.ok_or(ParseError::InvalidXml)?;
 
                 Ok(Some(defs::FieldDef::Switch(defs::SwitchField {
                     name: name.into(),
@@ -793,10 +811,8 @@ impl Parser {
             "exprfield" => {
                 let name = get_attr(node, "name")?;
                 let type_ = self.parse_field_value_type(node)?;
-                let expr = self.parse_expression(
-                    node.first_element_child()
-                        .ok_or_else(|| ParseError::InvalidXml)?,
-                )?;
+                let expr = self
+                    .parse_expression(node.first_element_child().ok_or(ParseError::InvalidXml)?)?;
 
                 Ok(Some(defs::FieldDef::Expr(defs::ExprField {
                     name: name.into(),
@@ -814,9 +830,13 @@ impl Parser {
     ) -> Result<defs::Alignment, ParseError> {
         assert!(node.is_element());
 
-        let align = get_attr_as_u32(node, "align")?;
-        let offset = try_get_attr_as_u32(node, "offset")?.unwrap_or(0);
-        Ok(defs::Alignment { align, offset })
+        let align = get_attr_parsed::<u32>(node, "align")?;
+        let offset = try_get_attr_parsed(node, "offset")?.unwrap_or(0);
+        if !align.is_power_of_two() || offset >= align {
+            Err(ParseError::InvalidRequiredStartAlign)
+        } else {
+            Ok(defs::Alignment::new(align, offset))
+        }
     }
 
     fn try_parse_switch_case(
@@ -901,7 +921,7 @@ impl Parser {
     ) -> Result<defs::Expression, ParseError> {
         self.try_parse_expression(node)
             .transpose()
-            .ok_or_else(|| ParseError::InvalidXml)?
+            .ok_or(ParseError::InvalidXml)?
     }
 
     fn try_parse_expression(
@@ -995,25 +1015,25 @@ impl Parser {
                 let ref_ = get_attr(node, "ref")?;
 
                 let operands = self.parse_expression_list(node)?;
-                if operands.len() > 1 {
-                    return Err(ParseError::InvalidXml);
-                }
-                let mut operand_iter = operands.into_iter();
-                let operand = operand_iter.next().map(Box::new);
+                let operand = match operands.len() {
+                    0 => defs::Expression::ListElementRef,
+                    1 => operands.into_iter().next().unwrap(),
+                    _ => return Err(ParseError::InvalidXml),
+                };
 
                 Ok(Some(defs::Expression::SumOf(defs::SumOfExpr {
                     field_name: ref_.into(),
                     resolved_field: OnceCell::new(),
-                    operand,
+                    operand: Box::new(operand),
                 })))
             }
             "listelement-ref" => Ok(Some(defs::Expression::ListElementRef)),
             "value" => {
-                let value = get_text_as_u32(node)?;
+                let value = get_text_parsed(node)?;
                 Ok(Some(defs::Expression::Value(value)))
             }
             "bit" => {
-                let bit = get_text_as_u8(node)?;
+                let bit = get_text_parsed(node)?;
                 if bit >= 32 {
                     return Err(ParseError::InvalidXml);
                 }
@@ -1113,80 +1133,26 @@ impl Parser {
     }
 }
 
-fn parse_bool(value: &str) -> Option<bool> {
-    match value {
-        "false" => Some(false),
-        "true" => Some(true),
-        _ => None,
-    }
-}
-
 fn get_attr<'a>(node: roxmltree::Node<'a, '_>, name: &str) -> Result<&'a str, ParseError> {
-    node.attribute(name).ok_or_else(|| ParseError::InvalidXml)
+    node.attribute(name).ok_or(ParseError::InvalidXml)
 }
 
-fn get_attr_as_bool(node: roxmltree::Node<'_, '_>, name: &str) -> Result<bool, ParseError> {
-    parse_bool(get_attr(node, name)?).ok_or_else(|| ParseError::InvalidXml)
+fn get_attr_parsed<T: FromStr>(node: roxmltree::Node<'_, '_>, name: &str) -> Result<T, ParseError> {
+    try_get_attr_parsed(node, name)?.ok_or(ParseError::InvalidXml)
 }
 
-fn try_get_attr_as_bool(
+fn try_get_attr_parsed<T: FromStr>(
     node: roxmltree::Node<'_, '_>,
     name: &str,
-) -> Result<Option<bool>, ParseError> {
+) -> Result<Option<T>, ParseError> {
     node.attribute(name)
-        .map(|value| parse_bool(value).ok_or_else(|| ParseError::InvalidXml))
+        .map(FromStr::from_str)
         .transpose()
-}
-
-fn get_attr_as_u8(node: roxmltree::Node<'_, '_>, name: &str) -> Result<u8, ParseError> {
-    u8::from_str(get_attr(node, name)?).map_err(|_| ParseError::InvalidXml)
-}
-
-fn get_attr_as_i16(node: roxmltree::Node<'_, '_>, name: &str) -> Result<i16, ParseError> {
-    i16::from_str(get_attr(node, name)?).map_err(|_| ParseError::InvalidXml)
-}
-
-fn get_attr_as_u16(node: roxmltree::Node<'_, '_>, name: &str) -> Result<u16, ParseError> {
-    u16::from_str(get_attr(node, name)?).map_err(|_| ParseError::InvalidXml)
-}
-
-fn get_attr_as_u32(node: roxmltree::Node<'_, '_>, name: &str) -> Result<u32, ParseError> {
-    u32::from_str(get_attr(node, name)?).map_err(|_| ParseError::InvalidXml)
-}
-
-fn try_get_attr_as_u16(
-    node: roxmltree::Node<'_, '_>,
-    name: &str,
-) -> Result<Option<u16>, ParseError> {
-    node.attribute(name)
-        .map(|value| u16::from_str(value).map_err(|_| ParseError::InvalidXml))
-        .transpose()
-}
-
-fn try_get_attr_as_u32(
-    node: roxmltree::Node<'_, '_>,
-    name: &str,
-) -> Result<Option<u32>, ParseError> {
-    node.attribute(name)
-        .map(|value| u32::from_str(value).map_err(|_| ParseError::InvalidXml))
-        .transpose()
+        .map_err(|_| ParseError::InvalidXml)
 }
 
 fn get_text<'a>(node: roxmltree::Node<'a, '_>) -> Result<&'a str, ParseError> {
-    let mut text = None;
-    for child_node in node.children() {
-        if child_node.is_comment() {
-            continue;
-        }
-        if !child_node.is_text() {
-            return Err(ParseError::InvalidXml);
-        }
-        if text.is_some() {
-            return Err(ParseError::InvalidXml);
-        }
-        text = Some(child_node.text().unwrap());
-    }
-    text.ok_or_else(|| ParseError::InvalidXml)
+    try_get_text(node)?.ok_or(ParseError::InvalidXml)
 }
 
 fn try_get_text<'a>(node: roxmltree::Node<'a, '_>) -> Result<Option<&'a str>, ParseError> {
@@ -1206,10 +1172,6 @@ fn try_get_text<'a>(node: roxmltree::Node<'a, '_>) -> Result<Option<&'a str>, Pa
     Ok(text)
 }
 
-fn get_text_as_u8(node: roxmltree::Node<'_, '_>) -> Result<u8, ParseError> {
-    u8::from_str(get_text(node)?).map_err(|_| ParseError::InvalidXml)
-}
-
-fn get_text_as_u32(node: roxmltree::Node<'_, '_>) -> Result<u32, ParseError> {
-    u32::from_str(get_text(node)?).map_err(|_| ParseError::InvalidXml)
+fn get_text_parsed<T: FromStr>(node: roxmltree::Node<'_, '_>) -> Result<T, ParseError> {
+    FromStr::from_str(get_text(node)?).map_err(|_| ParseError::InvalidXml)
 }

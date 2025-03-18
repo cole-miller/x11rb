@@ -1,5 +1,6 @@
 use crate::{defs, ResolveError};
 
+/// Gather elements to param references in the module.
 pub(super) fn gather(module: &defs::Module) -> Result<(), ResolveError> {
     for ns in module.namespaces.borrow().values() {
         for type_def in ns.type_defs.borrow().values() {
@@ -37,6 +38,10 @@ impl StructParamRefGatherer {
         let mut gatherer = Self {
             external_params: Vec::new(),
         };
+
+        if let Some(ref length_expr) = struct_def.length_expr {
+            gatherer.gather_param_refs_in_expr(length_expr)?;
+        }
 
         for field in struct_def.fields.borrow().iter() {
             gatherer.gather_param_refs_in_field(field)?;
@@ -97,7 +102,7 @@ impl StructParamRefGatherer {
             defs::Expression::ParamRef(param_ref_expr) => {
                 self.add_external_param(
                     &param_ref_expr.field_name,
-                    param_ref_expr.type_.def.get().unwrap().clone(),
+                    param_ref_expr.type_.get_resolved().clone(),
                 )?;
                 Ok(())
             }
@@ -107,9 +112,7 @@ impl StructParamRefGatherer {
                 Ok(())
             }
             defs::Expression::SumOf(sum_of_expr) => {
-                if let Some(ref operand) = sum_of_expr.operand {
-                    self.gather_param_refs_in_expr(operand)?;
-                }
+                self.gather_param_refs_in_expr(&sum_of_expr.operand)?;
                 Ok(())
             }
             defs::Expression::ListElementRef => Ok(()),
